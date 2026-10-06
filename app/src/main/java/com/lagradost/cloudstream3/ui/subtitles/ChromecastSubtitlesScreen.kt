@@ -49,7 +49,7 @@ object ChromecastSubtitlesScreen : SearchableSettings {
         var state by chromeCastSubtitleState
         val context = LocalContext.current
 
-        SideEffect(state) {
+        SideEffect {
             // When we modify the state, we modify the stored data
             context.saveStyle(state)
         }

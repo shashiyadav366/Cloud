@@ -47,6 +47,7 @@ import com.lagradost.cloudstream3.ui.result.ActorAdaptor
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter
 import com.lagradost.cloudstream3.ui.result.ImageAdapter
 import com.lagradost.cloudstream3.ui.search.SearchAdapter
+import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.updateTv
@@ -594,6 +595,21 @@ object CommonActivity {
             //    "Got Keycode $keyCode | ${KeyEvent.keyCodeToString(keyCode)} \n ${event?.action}",
             //    Toast.LENGTH_LONG
             //)
+        }
+
+        // TV/Android 5: the remote BACK button does not reliably reach the
+        // OnBackPressedDispatcher in the general (non-player) interface, so route it
+        // explicitly. Dispatching only runs for the key-down; the key-up is also
+        // consumed to avoid a double back press. The check for keyEventListener == null
+        // keeps the video player's own BACK handling (FullScreenPlayer) untouched.
+        if (isLayout(TV or EMULATOR) &&
+            event?.keyCode == KeyEvent.KEYCODE_BACK &&
+            keyEventListener == null
+        ) {
+            if (event?.action == KeyEvent.ACTION_DOWN) {
+                (act as? ComponentActivity)?.onBackPressedDispatcher?.onBackPressed()
+            }
+            return true
         }
 
         // if someone else want to override the focus then don't handle the event as it is already

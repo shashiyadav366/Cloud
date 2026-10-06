@@ -141,7 +141,7 @@ object SubtitlesScreen : SearchableSettings {
         var state by subtitleStyleState
         val context = LocalContext.current
 
-        SideEffect(state) {
+        SideEffect {
             // When we modify the state, we modify the stored data
             context.saveStyle(state)
         }

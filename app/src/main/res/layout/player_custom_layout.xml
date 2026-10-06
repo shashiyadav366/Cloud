@@ -469,6 +469,7 @@
 
                         android:background="@drawable/video_tap_button_skip"
                         android:nextFocusLeft="@id/player_rew"
+                        android:nextFocusRight="@id/player_pause_play"
                         android:nextFocusUp="@id/player_go_back"
                         android:nextFocusDown="@id/player_lock"
                         android:padding="10dp"
@@ -536,7 +537,8 @@
                         android:layout_gravity="center"
 
                         android:background="@drawable/video_tap_button_skip"
-                        android:nextFocusRight="@id/player_rew"
+                        android:nextFocusLeft="@id/player_pause_play"
+                        android:nextFocusRight="@id/player_ffwd"
                         android:nextFocusUp="@id/player_go_back"
                         android:nextFocusDown="@id/player_lock"
                         android:padding="10dp"
@@ -861,6 +863,7 @@
                             style="@style/VideoButton"
                             android:nextFocusLeft="@id/player_skip_episode"
                             android:nextFocusRight="@id/player_resize_btt"
+                            android:nextFocusUp="@id/player_pause_play"
                             android:text="@string/video_lock"
                             app:icon="@drawable/video_locked"
 
@@ -870,12 +873,13 @@
                             android:id="@+id/player_lock_holder"
                             android:layout_width="wrap_content"
                             android:layout_height="match_parent"
-                            android:orientation="horizontal">
+                            android:orientation="horizontal">                            
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_rotate_btt"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_lock"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusRight="@id/player_resize_btt"
                                 android:text="@string/rotate_video"
@@ -885,6 +889,7 @@
                                 android:id="@+id/player_resize_btt"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_rotate_btt"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusRight="@id/player_speed_btt"
                                 android:text="@string/video_aspect_ratio_resize"
@@ -894,6 +899,7 @@
                                 android:id="@+id/player_speed_btt"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_resize_btt"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusRight="@id/player_subtitle_offset_btt"
                                 app:icon="@drawable/ic_baseline_speed_24"
@@ -903,6 +909,7 @@
                                 android:id="@+id/player_subtitle_offset_btt"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_speed_btt"
+                                android:nextFocusUp="@id/player_pause_play"
                                 android:nextFocusRight="@id/player_sources_btt"
                                 android:text="@string/subtitle_offset"
 
@@ -914,6 +921,7 @@
                                 android:id="@+id/player_sources_btt"
                                 style="@style/VideoButton"
                                 android:layout_height="40dp"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusLeft="@id/player_subtitle_offset_btt"
                                 android:nextFocusRight="@id/player_tracks_btt"
@@ -925,17 +933,29 @@
                                 android:id="@+id/player_tracks_btt"
                                 style="@style/VideoButton"
                                 android:layout_height="40dp"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusLeft="@id/player_sources_btt"
-                                android:nextFocusRight="@id/player_compressor_btt"
+android:nextFocusRight="@id/player_mute_btt"
                                 android:text="@string/tracks"
                                 app:icon="@drawable/ic_baseline_equalizer_24" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/player_mute_btt"
+                                style="@style/VideoButton"
+                                android:layout_height="40dp"
+                                android:nextFocusLeft="@id/player_tracks_btt"
+                                android:nextFocusUp="@id/player_pause_play"
+                                android:nextFocusRight="@id/player_compressor_btt"
+                                android:text="@string/mute"
+                                app:icon="@drawable/ic_baseline_volume_up_24" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/player_compressor_btt"
                                 style="@style/VideoButton"
                                 android:layout_height="40dp"
-                                android:nextFocusLeft="@id/player_tracks_btt"
+                                android:nextFocusLeft="@id/player_mute_btt"
+                                android:nextFocusUp="@id/player_pause_play"
                                 android:nextFocusRight="@id/player_skip_op"
                                 android:text="@string/compressor"
                                 app:icon="@drawable/ic_compressor_24" />
@@ -944,6 +964,7 @@
                                 android:id="@+id/player_skip_op"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_sources_btt"
+                                android:nextFocusUp="@id/player_pause_play"
 
                                 android:nextFocusRight="@id/player_skip_episode"
                                 android:text="@string/video_skip_op"
@@ -953,6 +974,7 @@
                                 android:id="@+id/player_skip_episode"
                                 style="@style/VideoButton"
                                 android:nextFocusLeft="@id/player_skip_op"
+                                android:nextFocusUp="@id/player_pause_play"
                                 android:nextFocusRight="@id/player_lock"
                                 android:text="@string/next_episode"
                                 app:icon="@drawable/ic_baseline_skip_next_24" />
@@ -1175,5 +1197,31 @@
             android:descendantFocusability="afterDescendants">
 
         </androidx.recyclerview.widget.RecyclerView>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/player_tracks_overlay"
+        android:visibility="gone"
+        android:padding="5dp"
+        android:background="?attr/primaryBlackBackground"
+        android:orientation="vertical"
+        android:layout_gravity="end"
+        android:layout_width="360dp"
+        android:layout_height="match_parent">
+
+        <TextView
+            android:id="@+id/player_tracks_overlay_title"
+            android:padding="10dp"
+            style="@style/WatchHeaderText"
+            android:textSize="15sp"
+            android:layout_marginEnd="0dp"
+            android:text="@string/tracks"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"/>
+
+        <FrameLayout
+            android:id="@+id/player_tracks_overlay_content"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"/>
     </LinearLayout>
 </FrameLayout>

@@ -128,6 +128,7 @@ object TestScreen : Screen {
         Content(state, viewModel::onAction)
     }
 
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
     @Composable
     fun Content(
         state: TestState,

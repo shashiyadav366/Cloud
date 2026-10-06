@@ -52,8 +52,6 @@ import androidx.media3.container.DolbyVisionConfig
 import androidx.media3.container.NalUnitUtil
 import androidx.media3.extractor.AacUtil
 import androidx.media3.extractor.AvcConfig
-import androidx.media3.extractor.ChunkIndex
-import androidx.media3.extractor.ChunkIndexProvider
 import androidx.media3.extractor.DtsUtil
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorInput
@@ -65,11 +63,9 @@ import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.SeekMap.SeekPoints
 import androidx.media3.extractor.SeekPoint
-import androidx.media3.extractor.TrackAwareSeekMap
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.TrackOutput.CryptoData
 import androidx.media3.extractor.TrueHdSampleRechunker
-import androidx.media3.extractor.metadata.ThumbnailMetadata
 import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.text.SubtitleTranscodingExtractorOutput
 import com.google.common.base.Preconditions.checkArgument
@@ -504,9 +500,7 @@ class UpdatedMatroskaExtractor private constructor(
                         val seekMap = MatroskaSeekMap(
                             perTrackCues,
                             durationUs,
-                            primarySeekTrackNumber,
-                            segmentContentPosition,
-                            segmentContentSize
+                            primarySeekTrackNumber
                         )
                         extractorOutput!!.seekMap(seekMap)
                     }
@@ -514,7 +508,6 @@ class UpdatedMatroskaExtractor private constructor(
                     inCuesElement = false
                     for (i in 0 until tracks.size()) {
                         val track: Track = tracks.valueAt(i)
-                        track.maybeAddThumbnailMetadata(perTrackCues, durationUs, segmentContentPosition, segmentContentSize)
                         if (!track.waitingForDtsAnalysis) {
                             track.assertOutputInitialized()
                             track.output!!.format(requireNotNull(track.format))
@@ -1365,13 +1358,6 @@ class UpdatedMatroskaExtractor private constructor(
 
         if (track.waitingForDtsAnalysis) {
             checkNotNull(track.format)
-            if (DtsUtil.isSampleDtsHd(input, size)) {
-                track.format = track.format!!
-                    .buildUpon()
-                    .setSampleMimeType(MimeTypes.AUDIO_DTS_HD)
-                    .build()
-            }
-
             track.output!!.format(track.format!!)
             track.waitingForDtsAnalysis = false
             maybeEndTracks()
@@ -2286,90 +2272,6 @@ class UpdatedMatroskaExtractor private constructor(
             }
 
         /**
-         * Finds the best thumbnail timestamp from the cue points and adds it to the track's format as
-         * [ThumbnailMetadata].
-         */
-        fun maybeAddThumbnailMetadata(
-            perTrackCues: SparseArray<MutableList<MatroskaSeekMap.CuePointData>>,
-            durationUs: Long,
-            segmentContentPosition: Long,
-            segmentContentSize: Long
-        ) {
-            if (type != C.TRACK_TYPE_VIDEO) return
-
-            val cuePoints = perTrackCues[number]
-            if (cuePoints.isNullOrEmpty()) return
-
-            val thumbnailTimestampUs = findBestThumbnailPresentationTimeUs(
-                cuePoints, durationUs, segmentContentPosition, segmentContentSize
-            )
-
-            if (thumbnailTimestampUs != C.TIME_UNSET) {
-                val currentFormat = requireNotNull(format)
-                val existingMetadata = currentFormat.metadata
-                val thumbnailMetadata = ThumbnailMetadata(thumbnailTimestampUs)
-                val newMetadata = if (existingMetadata == null) {
-                    Metadata(thumbnailMetadata)
-                } else {
-                    existingMetadata.copyWithAppendedEntries(thumbnailMetadata)
-                }
-                format = currentFormat.buildUpon().setMetadata(newMetadata).build()
-            }
-        }
-
-        /**
-         * Finds the best thumbnail timestamp from the provided cue points.
-         *
-         * <p>The heuristic seeks to find a visually interesting frame by assuming that a larger chunk
-         * size corresponds to a more complex and representative frame. It calculates an approximate
-         * bitrate for each chunk and selects the timestamp of the chunk with the highest bitrate.
-         */
-        private fun findBestThumbnailPresentationTimeUs(
-            cuePoints: MutableList<MatroskaSeekMap.CuePointData>,
-            durationUs: Long,
-            segmentContentPosition: Long,
-            segmentContentSize: Long
-        ): Long {
-            if (cuePoints.isEmpty()) return C.TIME_UNSET
-
-            var maxBitrate = 0.0
-            var bestCueIndex = -1
-            val scanLimit = min(cuePoints.size, MAX_CHUNKS_TO_SCAN_FOR_THUMBNAIL)
-
-            for (i in 0 until scanLimit) {
-                val cue = cuePoints[i]
-
-                if (cue.timeUs > MAX_DURATION_US_TO_SCAN_FOR_THUMBNAIL) break
-
-                val bytesBetweenCues: Long
-                val durationBetweenCuesUs: Long
-
-                if (i < cuePoints.size - 1) {
-                    val nextCue = cuePoints[i + 1]
-                    bytesBetweenCues = (nextCue.clusterPosition + nextCue.relativePosition) -
-                        (cue.clusterPosition + cue.relativePosition)
-                    durationBetweenCuesUs = nextCue.timeUs - cue.timeUs
-                } else {
-                    // Last cue point
-                    bytesBetweenCues = (segmentContentPosition + segmentContentSize) -
-                        (cue.clusterPosition + cue.relativePosition)
-                    durationBetweenCuesUs = durationUs - cue.timeUs
-                }
-
-                if (durationBetweenCuesUs > 0) {
-                    // This is an approximation of the bitrate for thumbnail heuristic.
-                    val bitrate = bytesBetweenCues.toDouble() / durationBetweenCuesUs
-                    if (bitrate > maxBitrate) {
-                        maxBitrate = bitrate
-                        bestCueIndex = i
-                    }
-                }
-            }
-
-            return if (bestCueIndex == -1) C.TIME_UNSET else cuePoints[bestCueIndex].timeUs
-        }
-
-        /**
          * Checks that the track has an output.
          *
          *
@@ -3078,42 +2980,19 @@ class UpdatedMatroskaExtractor private constructor(
     class MatroskaSeekMap(
         private val perTrackCues: SparseArray<MutableList<CuePointData>>,
         private val durationUs: Long,
-        private val primarySeekTrackNumber: Int,
-        segmentContentPosition: Long,
-        segmentContentSize: Long
-    ) : TrackAwareSeekMap, ChunkIndexProvider {
-
-        private val chunkIndex: ChunkIndex? =
-            buildChunkIndex(
-                perTrackCues,
-                durationUs,
-                primarySeekTrackNumber,
-                segmentContentPosition,
-                segmentContentSize
-            )
+        private val primarySeekTrackNumber: Int
+    ) : SeekMap {
 
         override fun isSeekable(): Boolean {
             // The media is seekable overall only if the primary seek track has cue points.
-            return isSeekable(primarySeekTrackNumber)
-        }
-
-        override fun isSeekable(trackId: Int): Boolean {
-            val cuePoints = perTrackCues[trackId]
+            val cuePoints = perTrackCues[primarySeekTrackNumber]
             return !cuePoints.isNullOrEmpty()
         }
 
         override fun getDurationUs(): Long = durationUs
 
-        override fun getSeekPoints(timeUs: Long): SeekPoints =
-            chunkIndex?.getSeekPoints(timeUs)
-                ?: SeekPoints(SeekPoint.START)
-
-        override fun getSeekPoints(timeUs: Long, trackId: Int): SeekPoints {
-            var cuePoints = perTrackCues[trackId]
-
-            if ((cuePoints.isNullOrEmpty()) && trackId != primarySeekTrackNumber) {
-                cuePoints = perTrackCues[primarySeekTrackNumber]
-            }
+        override fun getSeekPoints(timeUs: Long): SeekPoints {
+            var cuePoints = perTrackCues[primarySeekTrackNumber]
 
             if (cuePoints.isNullOrEmpty()) {
                 return SeekPoints(SeekPoint.START)
@@ -3140,66 +3019,6 @@ class UpdatedMatroskaExtractor private constructor(
             } else {
                 val firstCue = cuePoints[0]
                 SeekPoints(SeekPoint(firstCue.timeUs, firstCue.clusterPosition))
-            }
-        }
-
-        override fun getChunkIndex(): ChunkIndex? = chunkIndex
-
-        private companion object {
-
-            private fun buildChunkIndex(
-                perTrackCues: SparseArray<MutableList<CuePointData>>,
-                durationUs: Long,
-                primarySeekTrackNumber: Int,
-                segmentContentPosition: Long,
-                segmentContentSize: Long
-            ): ChunkIndex? {
-
-                val primaryTrackCuePoints =
-                    perTrackCues[primarySeekTrackNumber] ?: return null
-
-                if (primaryTrackCuePoints.isEmpty()) {
-                    return null
-                }
-
-                val cuePointsSize = primaryTrackCuePoints.size
-                var sizes = IntArray(cuePointsSize)
-                var offsets = LongArray(cuePointsSize)
-                var durationsUs = LongArray(cuePointsSize)
-                var timesUs = LongArray(cuePointsSize)
-
-                for (i in 0 until cuePointsSize) {
-                    val cue = primaryTrackCuePoints[i]
-                    timesUs[i] = cue.timeUs
-                    offsets[i] = cue.clusterPosition
-                }
-
-                for (i in 0 until cuePointsSize - 1) {
-                    sizes[i] = (offsets[i + 1] - offsets[i]).toInt()
-                    durationsUs[i] = timesUs[i + 1] - timesUs[i]
-                }
-
-                // Start from the last cue point and move backward until a valid duration is found.
-                var lastValidIndex = cuePointsSize - 1
-                while (lastValidIndex > 0 && timesUs[lastValidIndex] >= durationUs) {
-                    lastValidIndex--
-                }
-
-                // Calculate sizes and durations for the last valid index
-                sizes[lastValidIndex] =
-                    (segmentContentPosition + segmentContentSize - offsets[lastValidIndex]).toInt()
-                durationsUs[lastValidIndex] = durationUs - timesUs[lastValidIndex]
-
-                // If trailing cue points were found, truncate the arrays to the last valid index.
-                if (lastValidIndex < cuePointsSize - 1) {
-                    Log.w(TAG, "Discarding trailing cue points with timestamps greater than total duration.")
-                    sizes = sizes.copyOf(lastValidIndex + 1)
-                    offsets = offsets.copyOf(lastValidIndex + 1)
-                    durationsUs = durationsUs.copyOf(lastValidIndex + 1)
-                    timesUs = timesUs.copyOf(lastValidIndex + 1)
-                }
-
-                return ChunkIndex(sizes, offsets, durationsUs, timesUs)
             }
         }
 

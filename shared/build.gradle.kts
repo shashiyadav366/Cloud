@@ -29,6 +29,7 @@ kotlin {
             languageSettings {
                 optIn("com.lagradost.cloudstream3.InternalAPI")
                 optIn("com.lagradost.cloudstream3.Prerelease")
+                optIn("androidx.compose.material3.ExperimentalMaterial3Api")
             }
         }
 

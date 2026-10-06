@@ -2,36 +2,43 @@ package com.lagradost.cloudstream3.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.integerArrayResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.PreviewLightDark
-import com.lagradost.cloudstream3.APIHolder
-import com.lagradost.cloudstream3.AllLanguagesName
+import androidx.compose.ui.unit.dp
 import com.lagradost.cloudstream3.CloudStreamApp
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.UnsafeSSL
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.insecureApp
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.network.initClient
-import com.lagradost.cloudstream3.ui.settings.SettingsProvidersScreen.toStringRes
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.isAppRestricted
 import com.lagradost.cloudstream3.utils.BatteryOptimizationChecker.showRequestIgnoreBatteryOptDialog
-import com.lagradost.cloudstream3.utils.SubtitleHelper.fromTagToLanguageName
-import com.lagradost.cloudstream3.utils.SubtitleHelper.getNameNextToFlagEmoji
+import com.lagradost.cloudstream3.utils.LinkBlocker
 import com.lagradost.cloudstream4.AppSettings
 import com.lagradost.cloudstream4.compose.ActionDialog
 import com.lagradost.cloudstream4.compose.PHONE
@@ -40,10 +47,10 @@ import com.lagradost.cloudstream4.rememberAppSettings
 import com.lagradost.cloudstream4.theme.CloudStreamPreviewTheme
 import com.lagradost.safefile.SafeFile
 import com.mihon.presentation.settings.Preference
+import com.mihon.presentation.settings.Preference.PreferenceItem
 import com.mihon.presentation.settings.SearchableSettings
 import com.mihon.presentation.settings.collectAsState
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.collections.immutable.toPersistentMap
 
 object SettingsGeneralScreen : SearchableSettings {
     @Composable
@@ -86,7 +93,10 @@ object SettingsGeneralScreen : SearchableSettings {
         //val downloadPath by settings.general.downloadPath.collectAsState()
 
         var isBatteryShown by remember { mutableStateOf(false) }
+        var isBlockedLinksShown by remember { mutableStateOf(false) }
         val context = LocalContext.current
+
+        val blockedLinks = remember { mutableStateOf(LinkBlocker.getActiveUserBlockedLinks()) }
 
         if (isBatteryShown) {
             ActionDialog(
@@ -108,53 +118,55 @@ object SettingsGeneralScreen : SearchableSettings {
             )
         }
 
-        val default = AllLanguagesName to stringResource(R.string.all_languages_preference)
-        val languages = APIHolder.apis.withLock {
-            APIHolder.apis.map { api -> api.lang }.distinct()
-        }.sortedBy { fromTagToLanguageName(it) ?: it }
+        if (isBlockedLinksShown) {
+            val initial = remember { LinkBlocker.getActiveUserBlockedLinks().joinToString("\n") }
+            val state = remember { mutableStateOf(initial) }
+            val context = LocalContext.current
+            AlertDialog(
+                onDismissRequest = { isBlockedLinksShown = false },
+                title = { Text(stringResource(R.string.blocked_links_title)) },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.blocked_links_dialog_hint))
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = state.value,
+                            onValueChange = { state.value = it },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        isBlockedLinksShown = false
+                        val value = state.value
+                        val list = LinkBlocker.parseUserBlockedLinks(value)
+                        if (list.size < (value.lines().filter { it.isNotBlank() }.size)) {
+                            Toast.makeText(context, R.string.blocked_links_too_many, Toast.LENGTH_SHORT).show()
+                        }
+                        LinkBlocker.saveUserBlockedLinks(list)
+                        blockedLinks.value = list
+                    }) { Text(stringResource(R.string.ok)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { isBlockedLinksShown = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
 
         return persistentListOf(
-            Preference.PreferenceGroup(title = stringResource(R.string.extension_language), preferenceItems = persistentListOf(
-                Preference.PreferenceItem.ListPreference(
-                    preference = settings.general.locale,
-                    entries = appLanguages.associate { (name, code) -> (code to (name to code).nameNextToFlagEmoji()) },
-                    title = stringResource(R.string.app_language),
-                    icon = painterResource(R.drawable.language_korean_latin_24px),
-                    onValueChanged = { value ->
-                        settings.general.locale.set(value)
-                        activity?.recreate()
-                        return@ListPreference false
-                    },
-                    subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
-                ),
-                Preference.PreferenceItem.MultiSelectListPreference(
-                    title = stringResource(R.string.provider_lang_settings),
-                    icon = painterResource(R.drawable.plugin_lang),
-                    entries = mapOf(default) + languages.associateWith { lang ->
-                        (getNameNextToFlagEmoji(
-                            lang
-                        ) ?: lang)
-                    },
-                    preference = settings.provider.extensionLanguages
-                ),
-                Preference.PreferenceItem.MultiSelectListPreference(
-                    title = stringResource(R.string.preferred_media_settings),
-                    icon = painterResource(R.drawable.movie_edit_24px),
-                    preference = settings.provider.preferredMedia,
-                    entries = TvType.entries.associate {
-                        it.ordinal.toString() to stringResource(it.toStringRes())
-                    }
-                        // Ok this looks strange af, but we do this to avoid double movie
-                        .toPersistentMap().remove(TvType.AnimeMovie.ordinal.toString()), onValueChanged = { diff ->
-                        if(diff.contains(TvType.Movie.ordinal.toString())) {
-                            settings.provider.preferredMedia.set(diff + TvType.AnimeMovie.ordinal.toString())
-                        } else {
-                            settings.provider.preferredMedia.set(diff - TvType.AnimeMovie.ordinal.toString())
-                        }
-                        return@MultiSelectListPreference false
-                    }),
-            )),
-
+            Preference.PreferenceItem.ListPreference(
+                preference = settings.general.locale,
+                entries = appLanguages.associate { (name, code) -> (code to (name to code).nameNextToFlagEmoji()) },
+                title = stringResource(R.string.app_language),
+                icon = painterResource(R.drawable.language_korean_latin_24px),
+                onValueChanged = { value ->
+                    settings.general.locale.set(value)
+                    activity?.recreate()
+                    return@ListPreference false
+                },
+                subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
+            ),
             Preference.PreferenceGroup(
                 title = stringResource(R.string.title_downloads),
                 preferenceItems = persistentListOf(
@@ -236,7 +248,17 @@ object SettingsGeneralScreen : SearchableSettings {
                         subtitle = stringResource(R.string.jsdelivr_proxy_summary),
                         icon = painterResource(R.drawable.wifi_proxy_24px),
                         preference = settings.general.jsdelivrProxy
-                    )
+                    ),
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(R.string.blocked_links_title),
+                        subtitle = if (blockedLinks.value.isEmpty()) {
+                            stringResource(R.string.blocked_links_summary)
+                        } else {
+                            "(%s)".format(blockedLinks.value.size.toString())
+                        },
+                        icon = painterResource(R.drawable.ic_baseline_block_24),
+                        onClick = { isBlockedLinksShown = true }
+                    ),
                 )
             ),
 
@@ -270,7 +292,7 @@ object SettingsGeneralScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(R.string.cs3wiki),
                         subtitle = "https://cloudstream.miraheze.org/",
-                        icon = painterResource(R.drawable.description_24px),
+                        icon = painterResource(R.drawable.baseline_description_24),
                         onClick = {
                             CloudStreamApp.openBrowser("https://cloudstream.miraheze.org/")
                         }

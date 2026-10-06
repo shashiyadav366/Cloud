@@ -105,7 +105,6 @@ class UpdatedDefaultExtractorsFactory : ExtractorsFactory {
     private var subtitleParserFactory: SubtitleParser.Factory
     private var codecsToParseWithinGopSampleDependencies: @C.VideoCodecFlags Int
     private var jpegFlags: @JpegExtractor.Flags Int = 0
-    private var heifFlags: @HeifExtractor.Flags Int = 0
 
     init {
         tsMode = TsExtractor.MODE_SINGLE_PMT
@@ -372,21 +371,6 @@ class UpdatedDefaultExtractorsFactory : ExtractorsFactory {
         return this
     }
 
-    /**
-     * Sets flags for [HeifExtractor] instances created by the factory.
-     *
-     * @see HeifExtractor.HeifExtractor
-     * @param flags The flags to use.
-     * @return The factory, for convenience.
-     */
-    @Synchronized
-    fun setHeifExtractorFlags(
-        flags: @HeifExtractor.Flags Int
-    ): UpdatedDefaultExtractorsFactory {
-        this.heifFlags = flags
-        return this
-    }
-
     @Synchronized
     override fun createExtractors(): Array<Extractor> {
         return createExtractors(Uri.EMPTY, HashMap())
@@ -555,7 +539,7 @@ class UpdatedDefaultExtractorsFactory : ExtractorsFactory {
             FileTypes.PNG -> extractors.add(PngExtractor())
             FileTypes.WEBP -> extractors.add(WebpExtractor())
             FileTypes.BMP -> extractors.add(BmpExtractor())
-            FileTypes.HEIF -> extractors.add(HeifExtractor(heifFlags))
+            FileTypes.HEIF -> extractors.add(HeifExtractor())
             FileTypes.AVIF -> extractors.add(AvifExtractor())
             FileTypes.WEBVTT, FileTypes.UNKNOWN -> {}
             else -> {}

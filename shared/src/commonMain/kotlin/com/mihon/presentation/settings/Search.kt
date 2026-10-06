@@ -11,7 +11,6 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.retain.retain
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -68,9 +67,7 @@ fun <T> SettingSearchResults(
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
 
     // We want to retain the results as backpress should not re-calc it
-    var result by retain<MutableState<PersistentList<SearchResultItem<T>>?>> {
-        mutableStateOf(null)
-    }
+    var result by remember { mutableStateOf<PersistentList<SearchResultItem<T>>?>(null) }
 
     var items by remember { mutableStateOf<ImmutableList<SettingsData<T>>>(persistentListOf()) }
     if (items.isEmpty() && searchKey.isNotEmpty()) {

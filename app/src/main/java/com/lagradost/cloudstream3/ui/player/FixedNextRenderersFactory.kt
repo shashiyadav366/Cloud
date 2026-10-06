@@ -50,7 +50,7 @@ class FixedNextRenderersFactory(
 
         return DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
-            .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
+            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf<AudioProcessor>(activeCompressor))
             .build()
     }

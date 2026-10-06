@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager.NameNotFoundException
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -36,16 +37,46 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
+import java.io.RandomAccessFile
+
+/**
+ * Builds the headers used to talk to the GitHub API. If the user has set a
+ * GitHub token (Settings -> Updates) it is sent as a Bearer token so that
+ * private repositories work too.
+ */
+internal fun githubApiHeaders(context: Context): Map<String, String> =
+    githubHeaders(context, "application/vnd.github.v3+json")
+
+/**
+ * Headers used when downloading release assets. The GitHub asset endpoint
+ * requires "application/octet-stream" to return the file instead of JSON.
+ */
+internal fun githubDownloadHeaders(context: Context): Map<String, String> =
+    githubHeaders(context, "application/octet-stream")
+
+private fun githubHeaders(context: Context, accept: String): Map<String, String> {
+    val token = PreferenceManager.getDefaultSharedPreferences(context)
+        .getString(context.getString(R.string.github_token_key), null)
+        ?.takeIf { it.isNotBlank() }
+    val headers = mutableMapOf("Accept" to accept)
+    if (token != null) headers["Authorization"] = "Bearer $token"
+    return headers
+}
 
 object InAppUpdater {
-    private const val GITHUB_USER_NAME = "recloudstream"
-    private const val GITHUB_REPO = "cloudstream"
+    private const val GITHUB_USER_NAME = "shashiyadav366"
+    private const val GITHUB_REPO = "Cloud"
 
     private const val PRERELEASE_PACKAGE_NAME = "com.lagradost.cloudstream3.prerelease"
     private const val LOG_TAG = "InAppUpdater"
+    private const val MIN_VALID_APK_SIZE = 1_000_000L // 1 MB min before we consider it an APK
+
+    private fun assetDownloadUrl(asset: GithubAsset) =
+        "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases/assets/${asset.id}"
 
     @Serializable
     private data class GithubAsset(
+        @JsonProperty("id") @SerialName("id") val id: Long,
         @JsonProperty("name") @SerialName("name") val name: String,
         @JsonProperty("size") @SerialName("size") val size: Int, // Size in bytes
         @JsonProperty("browser_download_url") @SerialName("browser_download_url") val browserDownloadUrl: String,
@@ -97,56 +128,59 @@ object InAppUpdater {
         }
     }
 
+    private fun String?.toVersionNumber(): Int? {
+        return this?.let {
+            Regex("""(\d+)\.(\d+)\.(\d+)""").find(it)?.groupValues?.let { g ->
+                g[1].toInt() * 100_000_000 + g[2].toInt() * 10_000 + g[3].toInt()
+            }
+        }
+    }
+
     private suspend fun Activity.getReleaseUpdate(): Update {
         val url = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
+        val headers = githubApiHeaders(this)
         val response = parseJson<Array<GithubRelease>>(
             app.get(url, headers = headers).text
         ).toList()
 
-        val versionRegex = Regex("""(.*?((\d+)\.(\d+)\.(\d+))\.apk)""")
-        val versionRegexLocal = Regex("""(.*?((\d+)\.(\d+)\.(\d+)).*)""")
-        val foundList = response.filter { rel ->
+        // Detect the newest non-prerelease release whose APK asset or tag name
+        // contains a version like X.Y.Z (e.g. "4.9.0.apk" or tag "v4.9.0")
+        val found = response.filter { rel ->
             !rel.prerelease
-        }.sortedWith(compareBy { release ->
-            release.assets.firstOrNull { it.contentType == "application/vnd.android.package-archive" }?.name?.let { it1 ->
-                versionRegex.find(it1)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                }
+        }.mapNotNull { rel ->
+            val apkAssets = rel.assets.filter {
+                it.contentType == "application/vnd.android.package-archive"
             }
-        }).toList()
+            val versionAsset = apkAssets.firstOrNull { it.name.toVersionNumber() != null }
+            val versionNumber =
+                (versionAsset?.name ?: rel.tagName).toVersionNumber() ?: return@mapNotNull null
+            Triple(versionNumber, rel, versionAsset ?: apkAssets.firstOrNull())
+        }.maxByOrNull { it.first }
 
-        val found = foundList.lastOrNull()
-        val foundAsset = found?.assets?.getOrNull(0)
-        val foundVersion = foundAsset?.name?.let { versionRegex.find(it) }
-
-        if (foundVersion == null) {
-            return Update(false, null, null, null, null)
-        }
+        val rel = found?.second ?: return Update(false, null, null, null, null)
+        val apkAsset = found.third ?: return Update(false, null, null, null, null)
+        val foundVersion = (apkAsset.name ?: rel.tagName)
 
         val currentVersion = packageName?.let {
             packageManager.getPackageInfo(it, 0)
         }
 
-        val shouldUpdate = if (foundAsset.browserDownloadUrl.isBlank()) {
+        val shouldUpdate = if (apkAsset.browserDownloadUrl.isBlank()) {
             false
         } else {
-            currentVersion?.versionName?.let { versionName ->
-                versionRegexLocal.find(versionName)?.groupValues?.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                }
-            }?.compareTo(
-                foundVersion.groupValues.let {
-                    it[3].toInt() * 100_000_000 + it[4].toInt() * 10_000 + it[5].toInt()
-                })!! < 0
+            val currentVersionNumber =
+                currentVersion?.versionName?.toVersionNumber() ?: return Update(false, null, null, null, null)
+            val foundVersionNumber =
+                foundVersion.toVersionNumber() ?: return Update(false, null, null, null, null)
+            currentVersionNumber < foundVersionNumber
         }
 
         return Update(
             shouldUpdate,
-            foundAsset.browserDownloadUrl,
-            foundVersion.groupValues[2],
-            found.body,
-            found.nodeId
+            assetDownloadUrl(apkAsset),
+            foundVersion,
+            rel.body,
+            rel.nodeId
         )
     }
 
@@ -154,18 +188,23 @@ object InAppUpdater {
         val tagUrl =
             "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/git/ref/tags/pre-release"
         val releaseUrl = "https://api.github.com/repos/$GITHUB_USER_NAME/$GITHUB_REPO/releases"
-        val headers = mapOf("Accept" to "application/vnd.github.v3+json")
+        val headers = githubApiHeaders(this)
         val response = parseJson<Array<GithubRelease>>(
             app.get(releaseUrl, headers = headers).text
         ).toList()
 
-        val found = response.lastOrNull { rel ->
+        val found = response.firstOrNull { rel ->
             rel.prerelease || rel.tagName == "pre-release"
-        }
+        } ?: return Update(false, null, null, null, null)
 
-        val foundAsset = found?.assets?.filter { it ->
+        // Prefer the dedicated prerelease build so the prerelease flavor
+        // always downloads its own APK instead of the stable one
+        val foundAsset = found.assets.filter { it ->
             it.contentType == "application/vnd.android.package-archive"
-        }?.getOrNull(0)
+        }.firstOrNull { it.name == "app-prerelease-release.apk" }
+            ?: found.assets.firstOrNull {
+                it.contentType == "application/vnd.android.package-archive"
+            }
 
         if (foundAsset == null) {
             return Update(false, null, null, null, null)
@@ -177,7 +216,7 @@ object InAppUpdater {
 
         return Update(
             currentCommitHash() != updateCommitHash,
-            foundAsset.browserDownloadUrl,
+            assetDownloadUrl(foundAsset),
             updateCommitHash,
             found.body,
             found.nodeId
@@ -197,12 +236,45 @@ object InAppUpdater {
                 it.name.startsWith(appUpdateName) && it.extension == appUpdateSuffix
             }?.forEach { deleteFileOnExit(it) }
 
-            val downloadedFile = File.createTempFile(appUpdateName, ".$appUpdateSuffix")
+            // On Android 5 the package installer cannot read APKs from the app's
+            // private cache dir, which surfaces as a misleading "parse error"
+            // even though the file is valid. Write to the external files dir
+            // (readable by the installer) when available so the legacy path works.
+            val targetDir = getExternalFilesDir(null) ?: cacheDir
+            val downloadedFile = File.createTempFile(
+                appUpdateName, ".$appUpdateSuffix", targetDir
+            )
             val sink: BufferedSink = downloadedFile.sink().buffer()
 
             updateLock.withLock {
-                sink.writeAll(app.get(url).body.source())
+                val response = app.get(url, headers = githubDownloadHeaders(this))
+                val badContentType = response.headers["Content-Type"]?.let {
+                    it.contains("html") || it.contains("json") || it.contains("text")
+                } == true
+                if (!response.isSuccessful || badContentType) {
+                    Log.d(LOG_TAG, "Update download failed (${response.code}) from $url")
+                    sink.close()
+                    deleteFileOnExit(downloadedFile)
+                    return false
+                }
+                sink.writeAll(response.body.source())
                 sink.close()
+
+                // Guard against installing a corrupt/truncated/JSON-error body.
+                // A valid APK is a ZIP and must start with PK\x03\x04 and be a
+                // reasonable size; otherwise Android would throw
+                // "problem parsing the package" when the installer opens it.
+                if (downloadedFile.length() < MIN_VALID_APK_SIZE ||
+                    !downloadedFile.isValidApk()
+                ) {
+                    Log.e(
+                        LOG_TAG,
+                        "Update download was not a valid APK (${downloadedFile.length()} bytes) from $url"
+                    )
+                    deleteFileOnExit(downloadedFile)
+                    return false
+                }
+
                 openApk(this, Uri.fromFile(downloadedFile))
             }
 
@@ -215,16 +287,56 @@ object InAppUpdater {
 
     private fun openApk(context: Context, uri: Uri) = safe {
         val path = uri.path ?: return@safe
-        val contentUri = FileProvider.getUriForFile(
-            context, BuildConfig.APPLICATION_ID + ".provider", File(path)
-        )
+
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-            data = contentUri
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // explicit MIME type is required for the package installer to
+            // resolve the intent, otherwise it throws ActivityNotFoundException
+            setDataAndType(uriForInstall(context, File(path)), "application/vnd.android.package-archive")
         }
-        context.startActivity(installIntent)
+
+        // On Android 5 the package installer reads a file:// URI directly (the
+        // file lives in our external files dir so it is readable). On Android 7+
+        // file:// URIs are blocked, so we must use a FileProvider content:// URI.
+        installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+        if (installIntent.resolveActivity(context.packageManager) != null) {
+            try {
+                context.startActivity(installIntent)
+                return@safe
+            } catch (e: Exception) {
+                logError(e)
+            }
+        }
+
+        // Last-resort: ACTION_INSTALL_PACKAGE
+        try {
+            val installIntent2 = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                setDataAndType(uriForInstall(context, File(path)), "application/vnd.android.package-archive")
+            }
+            context.startActivity(installIntent2)
+        } catch (e: Exception) {
+            logError(e)
+            Log.e(LOG_TAG, "No activity found to handle APK install for $path", e)
+        }
+    }
+
+    // Returns a file:// URI on Android 5 (readable by the installer from
+    // external storage) and a FileProvider content:// URI on Android 7+.
+    private fun uriForInstall(context: Context, file: File): Uri {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return Uri.fromFile(file)
+        }
+        return try {
+            FileProvider.getUriForFile(
+                context, BuildConfig.APPLICATION_ID + ".provider", file
+            )
+        } catch (e: Exception) {
+            logError(e)
+            Uri.fromFile(file)
+        }
     }
 
     fun Activity.installPreReleaseIfNeeded() = ioSafe {
@@ -368,5 +480,19 @@ object InAppUpdater {
         }
     } catch (_: IOException) {
         null
+    }
+
+    // A valid APK is a ZIP archive, so its first four bytes are the PK\x03\x04
+    // local-file-header magic. A corrupt/handled-as-error download (e.g. a JSON
+    // "Not Found" body from a private repo, or a truncated transfer) won't have it.
+    private fun File.isValidApk(): Boolean = try {
+        RandomAccessFile(this, "r").use { raf ->
+            val magic = ByteArray(4)
+            val read = raf.read(magic)
+            val pk = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+            read == 4 && magic.contentEquals(pk)
+        }
+    } catch (_: Exception) {
+        false
     }
 }
