@@ -891,11 +891,17 @@ class CS3IPlayer : IPlayer {
         }
 
         private fun getTrackSelector(context: Context, maxVideoHeight: Int?): TrackSelector {
+            val hasCap = maxVideoHeight != null && maxVideoHeight < Int.MAX_VALUE
             val trackSelector = DefaultTrackSelector(context)
             trackSelector.parameters = trackSelector.buildUponParameters()
-                // This will not force higher quality videos to fail
-                // but will make the m3u8 pick the correct preferred
+                // Cap the selected rendition inside a master playlist (e.g. 1080p on TV).
                 .setMaxVideoSize(Int.MAX_VALUE, maxVideoHeight ?: Int.MAX_VALUE)
+                // When a cap is configured, never pick a rendition above it; this makes the
+                // m3u8 pick the 1080p track instead of the 4K one.
+                .setExceedVideoConstraintsIfNecessary(!hasCap)
+                // Never select a rendition the device decoder cannot handle, otherwise the
+                // player picks e.g. 10-bit HDR HEVC on a TV that lacks support (4003).
+                .setExceedRendererCapabilitiesIfNecessary(false)
                 .setPreferredAudioLanguage(null)
                 .build()
             return trackSelector
