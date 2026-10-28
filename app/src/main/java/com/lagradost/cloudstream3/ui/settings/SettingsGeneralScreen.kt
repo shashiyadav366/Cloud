@@ -173,6 +173,18 @@ object SettingsGeneralScreen : SearchableSettings {
                 subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
             ),
             Preference.PreferenceGroup(
+                title = stringResource(R.string.title_home),
+                preferenceItems = persistentListOf(
+                    Preference.PreferenceItem.SwitchPreference(
+                        title = stringResource(R.string.live_cricket_events),
+                        subtitle = stringResource(R.string.live_cricket_events_summary),
+                        icon = painterResource(R.drawable.ic_baseline_tv_24),
+                        preference = settings.general.liveCricketEvents
+                    ),
+                )
+            ),
+
+            Preference.PreferenceGroup(
                 title = stringResource(R.string.title_downloads),
                 preferenceItems = persistentListOf(
                     Preference.PreferenceItem.TextPreference(
