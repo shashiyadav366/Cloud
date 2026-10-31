@@ -160,29 +160,46 @@ object SettingsGeneralScreen : SearchableSettings {
         }
 
         return persistentListOf(
-            Preference.PreferenceItem.ListPreference(
-                preference = settings.general.locale,
-                entries = appLanguages.associate { (name, code) -> (code to (name to code).nameNextToFlagEmoji()) },
-                title = stringResource(R.string.app_language),
-                icon = painterResource(R.drawable.language_korean_latin_24px),
-                onValueChanged = { value ->
-                    settings.general.locale.set(value)
-                    activity?.recreate()
-                    return@ListPreference false
-                },
-                subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
-            ),
-            Preference.PreferenceGroup(
-                title = stringResource(R.string.title_home),
-                preferenceItems = persistentListOf(
-                    Preference.PreferenceItem.SwitchPreference(
-                        title = stringResource(R.string.live_cricket_events),
-                        subtitle = stringResource(R.string.live_cricket_events_summary),
-                        icon = painterResource(R.drawable.ic_baseline_tv_24),
-                        preference = settings.general.liveCricketEvents
-                    ),
-                )
-            ),
+            Preference.PreferenceGroup(title = stringResource(R.string.extension_language), preferenceItems = persistentListOf(
+                Preference.PreferenceItem.ListPreference(
+                    preference = settings.general.locale,
+                    entries = appLanguages.associate { (name, code) -> (code to (name to code).nameNextToFlagEmoji()) },
+                    title = stringResource(R.string.app_language),
+                    icon = painterResource(R.drawable.language_korean_latin_24px),
+                    onValueChanged = { value ->
+                        settings.general.locale.set(value)
+                        activity?.recreate()
+                        return@ListPreference false
+                    },
+                    subtitleProvider = { v, e -> e[v] ?: getCurrentLocale(LocalContext.current) }
+                ),
+                Preference.PreferenceItem.MultiSelectListPreference(
+                    title = stringResource(R.string.provider_lang_settings),
+                    icon = painterResource(R.drawable.plugin_lang),
+                    entries = mapOf(default) + languages.associateWith { lang ->
+                        (getNameNextToFlagEmoji(
+                            lang
+                        ) ?: lang)
+                    },
+                    preference = settings.provider.extensionLanguages
+                ),
+                Preference.PreferenceItem.MultiSelectListPreference(
+                    title = stringResource(R.string.preferred_media_settings),
+                    icon = painterResource(R.drawable.movie_edit_24px),
+                    preference = settings.provider.preferredMedia,
+                    entries = TvType.entries.associate {
+                        it.ordinal.toString() to stringResource(it.toStringRes())
+                    }
+                        // Ok this looks strange af, but we do this to avoid double movie
+                        .toPersistentMap().remove(TvType.AnimeMovie.ordinal.toString()), onValueChanged = { diff ->
+                        if(diff.contains(TvType.Movie.ordinal.toString())) {
+                            settings.provider.preferredMedia.set(diff + TvType.AnimeMovie.ordinal.toString())
+                        } else {
+                            settings.provider.preferredMedia.set(diff - TvType.AnimeMovie.ordinal.toString())
+                        }
+                        return@MultiSelectListPreference false
+                    }),
+            )),
 
             Preference.PreferenceGroup(
                 title = stringResource(R.string.title_downloads),
