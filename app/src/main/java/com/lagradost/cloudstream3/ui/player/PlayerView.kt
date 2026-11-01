@@ -29,6 +29,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.MainThread
 import androidx.annotation.OptIn
+import androidx.annotation.RequiresApi
 import androidx.core.view.isGone
 import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
@@ -407,6 +408,10 @@ class PlayerView @JvmOverloads constructor(
                     settingsManager.getInt(context.getString(R.string.video_buffer_disk_key), 0) * 1024L * 1024L
                 cs3.videoBufferMs =
                     settingsManager.getInt(context.getString(R.string.video_buffer_length_key), 0) * 1000L
+
+                // Build the Cronet engine and the optional disk cache in the background now,
+                // instead of synchronously on the main thread when the first frame is requested.
+                cs3.warmUp(ctx)
             } catch (e: Exception) {
                 logError(e)
             }
@@ -557,12 +562,27 @@ class PlayerView @JvmOverloads constructor(
         }
     }
 
-    private val pausePlayAnimatable2Callback = object : Animatable2.AnimationCallback() {
-        override fun onAnimationEnd(drawable: Drawable?) {
-            playerPausePlay?.setImageResource(
-                if (player.getIsPlaying()) R.drawable.netflix_pause else R.drawable.netflix_play
-            )
-            super.onAnimationEnd(drawable)
+    // Animatable2 was added in API 23. Keep all references to it behind an API
+    // check and out of the constructor so Android 5 (API 21/22) can still start
+    // the player without a NoClassDefFoundError.
+    @RequiresApi(Build.VERSION_CODES.M)
+    private fun clearAnimatable2Callbacks(drawable: Drawable) {
+        if (drawable is Animatable2) {
+            drawable.clearAnimationCallbacks()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.M)
+    private fun registerAnimatable2Callback(drawable: Drawable) {
+        if (drawable is Animatable2) {
+            drawable.registerAnimationCallback(object : Animatable2.AnimationCallback() {
+                override fun onAnimationEnd(drawable: Drawable?) {
+                    playerPausePlay?.setImageResource(
+                        if (player.getIsPlaying()) R.drawable.netflix_pause else R.drawable.netflix_play
+                    )
+                    super.onAnimationEnd(drawable)
+                }
+            })
         }
     }
 
@@ -574,8 +594,8 @@ class PlayerView @JvmOverloads constructor(
         val currentPlayerDrawable = playerPausePlay?.drawable
         if (currentPlayerDrawable is Animatable2Compat) {
             currentPlayerDrawable.clearAnimationCallbacks()
-        } else if (currentPlayerDrawable is Animatable2) {
-            currentPlayerDrawable.clearAnimationCallbacks()
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && currentPlayerDrawable != null) {
+            clearAnimatable2Callbacks(currentPlayerDrawable)
         }
 
         keepScreenOn(isPlayingRightNow || isBuffering)
@@ -610,8 +630,8 @@ class PlayerView @JvmOverloads constructor(
                     // Therefore, we need to manually set a static SVG on animation end
                     if (drawable is Animatable2Compat) {
                         drawable.registerAnimationCallback(pausePlayAnimatable2CompatCallback)
-                    } else if (drawable is Animatable2) {
-                        drawable.registerAnimationCallback(pausePlayAnimatable2Callback)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && drawable != null) {
+                        registerAnimatable2Callback(drawable)
                     }
                 }
             } else {
